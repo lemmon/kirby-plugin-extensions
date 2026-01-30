@@ -11,6 +11,10 @@ use Kirby\Http\Query;
 class PageExtensions
 {
     /**
+     * Default cache expiry for related pages (24 hours in minutes)
+     */
+    public const DEFAULT_RELATED_CACHE_EXPIRY = 1440;
+    /**
      * Extended URL method that adds content type representation support.
      * Supports both params (path-based, Kirby-style) and query (query string).
      * Both can be provided simultaneously and will be used together.
@@ -105,5 +109,105 @@ class PageExtensions
         }
 
         return $baseUrl . $extendedPath . $queryString . $fragmentString;
+    }
+
+    /**
+     * Find related pages based on matching field values.
+     * Returns pages sharing at least one field value, shuffled and limited.
+     * Fills remaining slots with unrelated pages if needed.
+     * Results are cached for 24 hours for improved performance.
+     *
+     * @param \Kirby\Cms\Page $page The page instance
+     * @param string $field Field name to match against (e.g., 'tags')
+     * @param int $limit Maximum number of related pages to return
+     * @param int|null $level Number of field values to consider for matching (e.g., 2 for first 2 tags). If null, uses all values.
+     * @param \Kirby\Cms\Pages|null $pool Collection of pages to search within. Defaults to listed siblings of current page.
+     * @return \Kirby\Cms\Pages Collection of related pages
+     */
+    public static function related($page, string $field, int $limit, ?int $level = null, ?object $pool = null)
+    {
+        // Create cache key based on page ID, field, limit, level, and pool identifier
+        $poolId = $pool !== null ? 'custom' : 'siblings';
+        $cacheKey = self::createRelatedCacheKey($page->id(), $field, $limit, $level, $poolId);
+
+        // Check cache first
+        $cache = kirby()->cache('lemmon.extensions.related');
+        $cachedPageIds = $cache->get($cacheKey);
+
+        if ($cachedPageIds !== null && is_array($cachedPageIds)) {
+            // Reconstruct collection from cached page IDs, preserving order
+            $pages = [];
+            foreach ($cachedPageIds as $pageId) {
+                $cachedPage = $page->site()->find($pageId);
+                if ($cachedPage !== null) {
+                    $pages[] = $cachedPage;
+                }
+            }
+
+            // Verify all pages still exist and are accessible
+            if (count($pages) === count($cachedPageIds)) {
+                return new \Kirby\Cms\Pages($pages);
+            }
+        }
+
+        // Get pool of pages to search (default to listed siblings excluding current page)
+        $pool = ($pool ?? $page->siblings()->listed())->not($page);
+
+        // Get current page's field values
+        $currentValues = $page->$field()->split();
+
+        // Limit to first N values if level is specified
+        if ($level !== null && $level > 0) {
+            $currentValues = array_slice($currentValues, 0, $level);
+        }
+
+        // Start with empty collection
+        $result = $pool->slice(0, 0);
+
+        // Find related pages if there are values to match
+        if (count($currentValues) > 0) {
+            $relatedPages = $pool->filter(function ($item) use ($field, $currentValues) {
+                $itemField = $item->$field();
+                if ($itemField->isEmpty()) {
+                    return false;
+                }
+                $itemValues = $itemField->split();
+                return count(array_intersect($currentValues, $itemValues)) > 0;
+            })->shuffle()->limit($limit);
+
+            $result = $result->merge($relatedPages);
+        }
+
+        // Fill remaining slots with unrelated pages if needed
+        if ($result->count() < $limit) {
+            $unrelatedPages = $pool->not($result)->shuffle()->limit($limit - $result->count());
+            $result = $result->merge($unrelatedPages);
+        }
+
+        // Cache page IDs for 24 hours
+        $pageIds = [];
+        foreach ($result as $item) {
+            $pageIds[] = $item->id();
+        }
+        $cacheExpiry = kirby()->option('lemmon.extensions.relatedCacheExpiry', self::DEFAULT_RELATED_CACHE_EXPIRY);
+        $cache->set($cacheKey, $pageIds, $cacheExpiry);
+
+        return $result;
+    }
+
+    /**
+     * Create a cache key for related pages lookup
+     *
+     * @param string $pageId The page ID
+     * @param string $field Field name
+     * @param int $limit Limit value
+     * @param int|null $level Level value
+     * @param string $poolId Pool identifier
+     * @return string Cache key
+     */
+    private static function createRelatedCacheKey(string $pageId, string $field, int $limit, ?int $level, string $poolId): string
+    {
+        $content = $pageId . '|' . $field . '|' . $limit . '|' . ($level ?? 'all') . '|' . $poolId;
+        return 'related_' . hash('sha256', $content);
     }
 }
