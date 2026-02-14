@@ -77,6 +77,6 @@ Kirby::plugin('lemmon/extensions', [
          * @param int|null $length Maximum length in characters (text content only)
          * @return \Kirby\Cms\Field The field instance with modified value
          */
-        'excerptHtml' => fn (?int $length = null) => FieldExtensions::excerptHtml($this, $length),
+        'excerptHtml' => fn ($field, ?int $length = null) => FieldExtensions::excerptHtml($field, $length),
     ],
 ]);
