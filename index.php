@@ -7,6 +7,7 @@ use Lemmon\Extensions\PageExtensions;
 // Register autoloader for plugin classes
 F::loadClasses([
     'Lemmon\Extensions\FieldExtensions' => 'src/FieldExtensions.php',
+    'Lemmon\Extensions\MarkdownExport' => 'src/MarkdownExport.php',
     'Lemmon\Extensions\PageExtensions' => 'src/PageExtensions.php',
 ], __DIR__);
 
@@ -18,6 +19,7 @@ F::loadClasses([
  *
  * @revision 2025-12-30 - Initial implementation with urlExtended() and excerptHtml() methods
  * @revision 2026-01-30 - Added related() method for finding related pages by field values with caching
+ * @revision 2026-02-15 - Added MarkdownExport helper autoload for YAML front matter and heading normalization
  *
  * @see README.md
  */
